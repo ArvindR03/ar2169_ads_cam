@@ -142,28 +142,30 @@ def refactor_osm_data(pois):
 
     return pois_df
 
-def get_data_from_db_within_sqkm(longitude: float, latitude: float, year_from:int = 2020, year_to:int = 2024):
-    """
-    Function to query all houses in a 1km x 1km region around the centre of Cambridge that have been part of housing transactions since 2020.
-    :param longitude: float longitude
-    :param latitude: float latitude
-    :param year_from: int year from
-    :param year_to: int year to (inclusive)
-    """
+# convert this to pymysql
 
-    query_string = f"""
-    USE `ads_2024`;
-    select * from
-    (select * from `postcode_data` where longitude BETWEEN {longitude - 0.005} AND {longitude + 0.005} and latitude between {latitude - 0.005} and {latitude + 0.005})
-    as po
-    inner join pp_data as pp
-    on po.postcode = pp.postcode
-    where pp.date_of_transfer BETWEEN '{year_from}-01-01' AND '{year_to}-12-31';
-    """
+# def get_data_from_db_within_sqkm(longitude: float, latitude: float, year_from:int = 2020, year_to:int = 2024):
+#     """
+#     Function to query all houses in a 1km x 1km region around the centre of Cambridge that have been part of housing transactions since 2020.
+#     :param longitude: float longitude
+#     :param latitude: float latitude
+#     :param year_from: int year from
+#     :param year_to: int year to (inclusive)
+#     """
 
-    pp_query = %sql $query_string
-    pp_df = pd.DataFrame(pp_query)
-    return pp_df
+#     query_string = f"""
+#     USE `ads_2024`;
+#     select * from
+#     (select * from `postcode_data` where longitude BETWEEN {longitude - 0.005} AND {longitude + 0.005} and latitude between {latitude - 0.005} and {latitude + 0.005})
+#     as po
+#     inner join pp_data as pp
+#     on po.postcode = pp.postcode
+#     where pp.date_of_transfer BETWEEN '{year_from}-01-01' AND '{year_to}-12-31';
+#     """
+
+#     pp_query = %sql $query_string
+#     pp_df = pd.DataFrame(pp_query)
+#     return pp_df
 
 def get_buildings_in_area_from_osm(latitude: float, longitude: float, bound:float = None):
     """
