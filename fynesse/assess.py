@@ -256,19 +256,3 @@ def plot_area_wrt_buildings(place_name: str, latitude: float, longitude: float, 
     buildings_without_addresses.plot(ax=ax, color=without_addr_color, alpha=0.7, markersize=10, label="address incomplete", aspect=1)
 
     plt.tight_layout()
-
-def examine_price_area_relationship(input_df):
-    corr = input_df['price'].corr(input_df["area_sq_m"])
-    print(f"The Pearson coefficient of correlation between price and area is: {corr}")
-
-    # Draw graph accordingly
-    fig, ax = plt.subplots(figsize=(10,6))
-
-    a, b = np.polyfit(input_df['area_sq_m'], input_df['price'], 1)
-    ax.scatter(input_df['area_sq_m'], input_df['price'], color="blue", label="amenity")
-    ax.plot(input_df['area_sq_m'], a*input_df['area_sq_m']+b, color="blue")
-
-    plt.xlabel("Area (m^2)")
-    plt.ylabel("Price")
-    plt.title("Price against area")
-    plt.show()
