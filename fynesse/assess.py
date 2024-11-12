@@ -40,7 +40,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import osmnx as ox
-from access import refactor_osm_data, access_data
+
+# figure out how to make this work on import, for now added to bottom
+# from access import refactor_osm_data, access_data
 
 def count_pois_near_coordinates_simplified(latitude: float, longitude: float, tags: dict, pois_df, distance_km: float = 1.0) -> dict:
     """
@@ -256,3 +258,48 @@ def plot_area_wrt_buildings(place_name: str, latitude: float, longitude: float, 
     buildings_without_addresses.plot(ax=ax, color=without_addr_color, alpha=0.7, markersize=10, label="address incomplete", aspect=1)
 
     plt.tight_layout()
+
+"""
+FROM OTHER MODULES
+"""
+
+def access_data(
+        latitude: float, 
+        longitude: float, 
+        tags: dict = {
+            "amenity": True,
+            "buildings": True,
+            "historic": True,
+            "leisure": True,
+            "shop": True,
+            "tourism": True,
+            "religion": True,
+            "memorial": True
+        }, 
+        bound: float = 0.02
+        ):
+    """Function to access data from OSM given a latitude, longitude and bounding square length.
+    :param latitude: latitude of centre of bounding square
+    :param longitude: longitude of centre of bounding square
+    :param bound: length of bounding square in degrees
+    """
+    box_width = bound
+    box_height = bound
+    north = latitude + box_height/2
+    south = latitude - box_width/2
+    west = longitude - box_width/2
+    east = longitude + box_width/2
+
+    pois = ox.geometries_from_bbox(north, south, east, west, tags)
+
+    return pois
+
+def refactor_osm_data(pois):
+    """Function to refactor GeoDataFrame into DataFrame for usage.
+    :param pois: GeoDataFrame of OSM data
+    """
+    pois_df = pd.DataFrame(pois)
+    pois_df['latitude'] = pois_df.apply(lambda row: row.geometry.centroid.y, axis=1)
+    pois_df['longitude'] = pois_df.apply(lambda row: row.geometry.centroid.x, axis=1)
+
+    return pois_df
