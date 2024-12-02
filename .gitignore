@@ -1,0 +1,8 @@
+# ignore the notebooks
+/notebooks/
+
+# ignore the archived practicals
+/archived_practicals/
+
+# vscode stuff, can drop
+.DS_Store
