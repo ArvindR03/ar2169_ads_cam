@@ -1,8 +1,19 @@
-from . import access
+from . import access, assess
 from sklearn.metrics import r2_score
 import random
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import cross_validate, KFold
 from sklearn.linear_model import LinearRegression
+from sklearn.tree import plot_tree
+from sklearn.ensemble import RandomForestClassifier
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+import seaborn as sns
+from sklearn.cluster import KMeans
+
+# --------------
+# TASK 1
+# --------------
 
 # DONE
 def spatially_cluster_geocode_groupings(coa_code_groupings_indv, n=10):
@@ -118,6 +129,7 @@ class Task1Model:
     def predictWithModel(self, latitude, longitude):
         """
         Given a latitude and longitude, return a prediction for the set response variable.
+        Use the next nearest model if the model for the place does not exist.
         :param latitude: float
         :param longitude: float
         """
@@ -223,6 +235,8 @@ class Task1Model:
         """
         Nationally test the model by generating UK coordinates (or using submitted), and
         return the R2 value of the predicted result.
+        :param n: number of points to generate
+        :param coordinates: optional list of coordinates to test
         """
         predictions = []
         actuals = []
@@ -251,8 +265,6 @@ class Task1Model:
         predictions = list(filter(lambda x: x is not None, predictions))
 
         return r2_score(actuals, predictions)
-
-        # kfold test the model using all national data
 
     def _findCoaCodeGivenLatLong(self, lat, long):
         """
@@ -291,3 +303,268 @@ class Task1Model:
                 response = access.fetch_query_from_cloud_as_df(query, self.conn)
 
         return response.iloc[0]['coa_code']
+
+# --------------
+# TASK 2
+# same principles
+# --------------
+
+# DONE
+def modelMaxDepth(d=6, n=5, max_features='sqrt'):
+    """
+    Helper function.
+    Frame a wrapper for Random Forest classification that implements features to limit overfitting and complexity of model,
+    akin to regularization techniques used for regression problems.
+    :param d: max depth of each tree in random forest
+    :param n: number of trees in random forest
+    :param max_features: size of set of random features to choose at any node in the tree
+    :returns: specified RandomForestClassifier initialized model
+    """
+    return RandomForestClassifier(max_depth=d, n_estimators=n, max_features=max_features)
+
+# DONE
+class Task2Model:
+    """
+    Class to implement a given classification model for the purpose of predicting whether or
+    not a constituency is marginal or a stronghold in a given election.
+
+    Has inbuilt functionality to use clustering i.e. K-Means++, with a separate Random Forest
+    model for each cluster of the dataset fetched.
+    """
+
+    def __init__(
+            self, 
+            features, 
+            conn=None, 
+            response='responsevariable', 
+            census_table='historical_census_constituencies', 
+            model=RandomForestClassifier, 
+            year=1983,
+            clusters=1
+        ):
+        """
+        Initialize instance variables in the model, and set up model structure.
+        :param features: list of string features to use
+        :param conn
+        :param response
+        :param census_table: in the cloud
+        :param model: uninitialized model i.e. class/function
+        :param year
+        :param clusters: number of clusters (1 means no clustering)
+        """
+        self.model = model
+        self.X = None
+        self.y = None
+        self.features = features
+        self.response = response
+        self.census_table = census_table
+        self.conn = conn
+        self.year = year
+        self.clusters = clusters > 1
+        self.k = clusters
+
+        if self.clusters:
+            self.model = {
+                i:self.model for i in range(clusters)
+            }
+            self.Xs = [[] for i in range(clusters)]
+            self.ys = [[] for i in range(clusters)]
+
+    def fetchData(self):
+        """
+        Fetch the data to train on from the cloud, and segment if using clustering.
+        """
+        if self.conn is not None:
+            query = f"select * from {self.census_table};"
+            data = access.fetch_query_from_cloud_as_df(query, self.conn)
+            data = assess.preprocess_census_df_task2(data, year=self.year)
+            self.X = data[self.features]
+            self.y = data[self.response]
+
+            if self.clusters:
+                # then we use kmeansplusplus to cluster groups of area codes
+                km = KMeans(n_clusters=self.k, random_state=12, init='k-means++')
+                data = self.X.copy()
+                km.fit(data)
+
+                for idx in range(len(km.labels_)):
+                    label = km.labels_[idx]
+                    self.Xs[label].append(idx)
+                    self.ys[label].append(idx)
+
+                self.Xs = [self.X.iloc[indices] for indices in self.Xs]
+                self.ys = [self.y.iloc[indices] for indices in self.ys]
+
+        else:
+            print("error fetching data: conn is None")
+
+    def initializeAndTrainModel(self, X=None, y=None, Xs=None, ys=None):
+        """
+        Initialize and train the model, using data if submitted, else fetched and
+        stored data within the class. Train each model using cluster data if clustering.
+        :param X: optional feature data if no clustering
+        :param y: optional response data if no clustering
+        :param Xs: optional list of feature data for each cluster if clustering
+        :param ys: optional list of response data for each cluster if clustering
+        """
+        if self.clusters:
+            for k in self.model.keys():
+                self.model[k] = self.model[k]()
+                if Xs is None or ys is None:
+                    self.model[k].fit(self.Xs[k], self.ys[k])
+                else:
+                    self.model[k].fit(Xs[k], ys[k])
+        else:
+            self.model = self.model()
+            if X is None or y is None:
+                self.model.fit(self.X, self.y)
+            else:
+                self.model.fit(X, y)
+
+    def initializeModel(self):
+        """
+        Initialize the model (based on whether or not clusters are enabled).
+        """
+        if self.clusters:
+            for k in self.model.keys():
+                self.model[k] = self.model[k]()
+        else:
+            self.model = self.model()
+
+    def predictGivenConstituency(self, constituency, year):
+        """
+        Given the name of a valid constituency, and the year for that constituency,
+        get the prediction of the response variable for this constituency.
+        :param constituency: name
+        :param year: should be year of data you have
+        :returns: array either 0 or 1 for stronghold or marginal respectively
+        """
+        if year not in set([1974, 1983, 2024]):
+            print("wrong year constituency given, try again")
+        else:
+            data = self._fetchDataGivenConstituency(constituency, year)
+            data = assess.preprocess_census_df_task2(data, year=self.year)
+            X = data[self.features]
+            if self.clusters:
+                # we implicitly use clusters by getting prediction with highest confidence
+                predictions = [
+                    [k, v.predict(X), max(v.predict_proba(X)[0])] for k, v in self.model.items()
+                ]
+                return max(predictions, key=lambda x:x[2])[1]
+            else:
+                return self.model.predict(X)
+
+    def _fetchDataGivenConstituency(self, constituency, year):
+        """
+        Helper function
+        Given a constituency, fetch its data.
+        :param constituency: name
+        :param year
+        :returns: fetched features from the cloud
+        """
+        if year in set([1974, 1983]):
+            query = f"""
+            select ce.*
+            from constituencies_{year}_with_lookup as co
+            right join {self.census_table} as ce
+            on co.lookup_census=ce.mnemonic
+            where co.geom_name='{constituency}'
+            limit 1;
+            """
+            return access.fetch_query_from_cloud_as_df(query, self.conn)
+        elif year == 2024:
+            query = f"""
+            select * from 2024_census_constituencies
+            where geography='{constituency}'
+            limit 1;
+            """
+            return access.fetch_query_from_cloud_as_df(query, self.conn)
+    
+    def showModelDecisionTreeInterpretation(self):
+        """
+        Plot all of the decision trees from the Random Forest to interpret model.
+        """
+        if self.clusters:
+            for m in self.model.values():
+                for i in range(len(m.estimators_)):
+                    plt.figure(figsize=(15, 15))
+                    plot_tree(m.estimators_[i], feature_names=self.features, class_names=['stronghold', 'marginal'], filled=True, fontsize=6)
+                    plt.show()
+        else:
+            for i in range(len(self.model.estimators_)):
+                plt.figure(figsize=(15, 15))
+                plot_tree(self.model.estimators_[i], feature_names=self.features, class_names=['stronghold', 'marginal'], filled=True, fontsize=6)
+                plt.show()
+
+    def kFoldTestModel(self, k, return_train_score=False, initializeModel=True, metrics=['accuracy', 'precision', 'recall', 'f1', 'roc_auc']):
+        """
+        K-Fold test the model nationally.
+        :param k: number of folds
+        :param return_train_score: boolean whether or not to run metrics on train data too
+        :param initializeModel: boolean whether or not to initialize the model before testing
+        :param metrics: list of metrics to get
+        :returns: DataFrame of metrics for each fold
+        """
+        scoring = {i:i for i in metrics}
+
+        if initializeModel:
+            self.initializeModel()
+        
+        kf = KFold(n_splits=k, shuffle=True, random_state=12)
+
+        if self.clusters:
+            scores_s = [
+                pd.DataFrame(cross_validate(
+                    self.model[model_idx],
+                    self.Xs[model_idx],
+                    self.ys[model_idx].astype(int),
+                    cv=kf,
+                    scoring=scoring,
+                    return_train_score=return_train_score
+                )) for model_idx in set(self.model.keys())
+            ]
+            # ignore the index so we can group for each of the models, and avg
+            scores = pd.concat(scores_s, ignore_index=True)
+            scores = scores.groupby(scores.index).mean()
+            return scores
+        else:
+            scores = cross_validate(
+                self.model,
+                self.X,
+                self.y.astype(int),
+                cv=kf,
+                scoring=scoring,
+                return_train_score=return_train_score
+            )
+            return pd.DataFrame(scores)
+    
+    def plotModelPredictionPower(self, k_lower=2, k_upper=10):
+        """
+        K-Fold test for a range of k values, and plot the chart of metrics.
+        Should be run on a brand new class instantiation with fetched data.
+        :param k_lower: inclusive
+        :param k_upper: inclusive
+        """
+        metrics = ['accuracy', 'precision', 'recall', 'f1', 'roc_auc']
+        scores = self.kFoldTestModel(k=k_lower, return_train_score=True, metrics=metrics)
+        scores['k'] = k_lower
+        for k in range(k_lower+1, k_upper+1):
+            to_add = self.kFoldTestModel(k=k, return_train_score=True, initializeModel=False, metrics=metrics)
+            to_add['k'] = k
+            scores = pd.concat(
+                [
+                    scores,
+                    to_add
+                ]
+            )
+        scores = scores.reset_index(drop=True)
+        scores = scores.groupby('k').mean().reset_index(drop=False)
+        scores = scores.melt(
+            id_vars='k',
+            value_vars=["test_"+m for m in metrics]+["train_"+m for m in metrics],
+            var_name='metric',
+            value_name='score'
+        )
+
+        sns.lineplot(data=scores, x='k', y='score', hue='metric')
+        plt.title("Metrics for model used in classification of swing vs stronghold")
